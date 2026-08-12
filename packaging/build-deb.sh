@@ -16,6 +16,7 @@ install -d \
   "${BUILD_DIR}/DEBIAN" \
   "${BUILD_DIR}/usr/bin" \
   "${BUILD_DIR}/usr/share/doc/linux-whatsapp-web"
+chmod 0755 "${BUILD_DIR}"
 install -m 0644 "${PROJECT_DIR}/packaging/deb/DEBIAN/control" "${BUILD_DIR}/DEBIAN/control"
 install -m 0755 "${PROJECT_DIR}/bin/linux-whatsapp-web" "${BUILD_DIR}/usr/bin/linux-whatsapp-web"
 install -m 0644 \
