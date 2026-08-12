@@ -17,7 +17,8 @@ jobs:
           ./tests/run.sh
           ./packaging/build-source-archive.sh
           ./packaging/build-deb.sh
-          sha256sum dist/*.tar.gz dist/*.deb > dist/SHA256SUMS
+          cd dist
+          sha256sum ./*.tar.gz ./*.deb > SHA256SUMS
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

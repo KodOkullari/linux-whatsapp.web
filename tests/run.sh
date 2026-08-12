@@ -153,4 +153,13 @@ if find "${PROJECT_DIR}" -type f \( \
 fi
 ok "no browser database payloads"
 
+"${PROJECT_DIR}/packaging/build-source-archive.sh" >/dev/null
+"${PROJECT_DIR}/packaging/build-deb.sh" >/dev/null
+(
+  cd "${PROJECT_DIR}/dist"
+  sha256sum ./*.tar.gz ./*.deb > SHA256SUMS.test
+  sha256sum -c SHA256SUMS.test >/dev/null
+)
+ok "release checksum paths verify from the download directory"
+
 printf '1..%d\n' "${PASSED}"
