@@ -1,5 +1,5 @@
-linux-whatsapp-web (0.1.0) unstable; urgency=medium
+linux-whatsapp-web (0.1.1) unstable; urgency=medium
 
-  * Initial community preview release.
+  * Fix portable release checksums and Debian package root permissions.
 
  -- KodOkullari contributors <67424830+KodOkullari@users.noreply.github.com>  Wed, 12 Aug 2026 16:00:00 +0300

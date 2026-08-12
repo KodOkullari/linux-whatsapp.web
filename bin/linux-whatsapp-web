@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROGRAM_NAME="linux-whatsapp-web"
-PROGRAM_VERSION="0.1.0"
+PROGRAM_VERSION="0.1.1"
 OFFICIAL_URL="https://web.whatsapp.com/"
 CONFIG_FILENAME="config"
 

@@ -54,7 +54,7 @@ After setup, launch **WhatsApp Web** from the application menu.
 Tagged releases also include a small, architecture-independent `.deb`:
 
 ```bash
-sudo apt install ./linux-whatsapp-web_0.1.0_all.deb
+sudo apt install ./linux-whatsapp-web_0.1.1_all.deb
 linux-whatsapp-web setup
 ```
 

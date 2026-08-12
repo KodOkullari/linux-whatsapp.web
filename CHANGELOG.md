@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.1 - 2026-08-12
+
+- Make release checksum filenames portable after download.
+- Ensure the Debian package filesystem root has standard `0755` permissions.
+- Add regression tests for both packaging properties.
+- Update the official GitHub checkout action after Dependabot and CI verification.
+
 ## 0.1.0 - 2026-08-12
 
 Initial community preview:

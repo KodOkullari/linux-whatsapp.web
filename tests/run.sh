@@ -24,7 +24,8 @@ printf 'TAP version 13\n'
 bash -n "${CLI}" "${PROJECT_DIR}/install.sh" "${PROJECT_DIR}/uninstall.sh"
 ok "shell syntax"
 
-[[ "$("${CLI}" version)" == "linux-whatsapp-web 0.1.0" ]] || fail "unexpected version"
+VERSION="$("${CLI}" version | awk '{print $2}')"
+[[ "${VERSION}" == "0.1.1" ]] || fail "unexpected version"
 ok "version command"
 
 TEMP_ROOT="$(mktemp -d)"
@@ -155,7 +156,7 @@ ok "no browser database payloads"
 
 "${PROJECT_DIR}/packaging/build-source-archive.sh" >/dev/null
 "${PROJECT_DIR}/packaging/build-deb.sh" >/dev/null
-DEB_ROOT_MODE="$(dpkg-deb --fsys-tarfile "${PROJECT_DIR}/dist/linux-whatsapp-web_0.1.0_all.deb" | tar -tvf - | awk 'NR == 1 {print $1}')"
+DEB_ROOT_MODE="$(dpkg-deb --fsys-tarfile "${PROJECT_DIR}/dist/linux-whatsapp-web_${VERSION}_all.deb" | tar -tvf - | awk 'NR == 1 {print $1}')"
 [[ "${DEB_ROOT_MODE}" == "drwxr-xr-x" ]] || fail "Debian package root permissions are ${DEB_ROOT_MODE}"
 (
   cd "${PROJECT_DIR}/dist"

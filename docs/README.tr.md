@@ -45,7 +45,7 @@ Kurulum bitince uygulama menüsündeki **WhatsApp Web** simgesini kullanın.
 Etiketli sürümlerde kurulabilir `.deb` paketi de bulunur:
 
 ```bash
-sudo apt install ./linux-whatsapp-web_0.1.0_all.deb
+sudo apt install ./linux-whatsapp-web_0.1.1_all.deb
 linux-whatsapp-web setup
 ```
 
