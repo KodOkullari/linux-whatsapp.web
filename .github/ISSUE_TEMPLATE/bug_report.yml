@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a reproducible helper or launcher problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never upload QR codes, cookies, phone numbers, chats, browser databases, or unredacted screenshots.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, desktop/session (X11 or Wayland), and Brave packaging type.
+      placeholder: Ubuntu 24.04, GNOME 46 X11, Brave Snap
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Exact safe steps that reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted doctor output
+      description: Run `linux-whatsapp-web doctor --json`, review it, and redact paths/user names.
+      render: json
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

@@ -1,0 +1,12 @@
+Package: linux-whatsapp-web
+Version: 0.1.0
+Section: net
+Priority: optional
+Architecture: all
+Maintainer: KodOkullari contributors <67424830+KodOkullari@users.noreply.github.com>
+Depends: bash (>= 4), python3
+Homepage: https://github.com/KodOkullari/linux-whatsapp.web
+Description: Brave WhatsApp Web PWA setup and IBus diagnostic helper
+ Discovers an installed WhatsApp Web PWA in Brave, creates a correctly grouped
+ desktop launcher, and safely diagnoses common IBus keyboard-input failures.
+ It contains no browser, message, cookie, QR, or WhatsApp session data.

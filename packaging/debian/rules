@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+	./tests/run.sh
+
+override_dh_auto_install:
+	install -D -m 0755 bin/linux-whatsapp-web debian/linux-whatsapp-web/usr/bin/linux-whatsapp-web
+	install -D -m 0644 README.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/README.md
+	install -D -m 0644 docs/README.tr.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/README.tr.md
+	install -D -m 0644 docs/INSTALL.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/INSTALL.md
+	install -D -m 0644 docs/TROUBLESHOOTING.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/TROUBLESHOOTING.md
+	install -D -m 0644 docs/PRIVACY.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/PRIVACY.md
+	install -D -m 0644 SECURITY.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/SECURITY.md
+	install -D -m 0644 THIRD_PARTY_NOTICES.md debian/linux-whatsapp-web/usr/share/doc/linux-whatsapp-web/THIRD_PARTY_NOTICES.md

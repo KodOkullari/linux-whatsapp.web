@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils shellcheck
+      - name: ShellCheck
+        run: shellcheck bin/linux-whatsapp-web install.sh uninstall.sh tests/run.sh packaging/*.sh
+      - name: Integration tests
+        run: ./tests/run.sh
+
+  package:
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build source archive
+        run: |
+          ./packaging/build-source-archive.sh
+          ./packaging/build-deb.sh
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-whatsapp-web-source
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+          if-no-files-found: error

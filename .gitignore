@@ -1,0 +1,39 @@
+# Build output
+dist/
+*.deb
+*.tar.gz
+*.zip
+*.log
+
+# Editors and OS files
+.idea/
+.vscode/
+*~
+.DS_Store
+
+# Never commit browser profiles or authentication/session material
+BraveSoftware/
+google-chrome/
+chromium/
+Cookies
+Cookies-journal
+Login Data
+Login Data-journal
+Web Data
+Web Data-journal
+IndexedDB/
+Local Storage/
+Session Storage/
+Service Worker/
+Sessions/
+Network/
+User Data/
+Default/
+Profile */
+*.ldb
+*.sqlite
+*.sqlite3
+
+# Screenshots can contain QR codes, phone numbers, and chats
+screenshots/
+*.screenshot.png

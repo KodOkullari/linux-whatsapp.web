@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROGRAM_NAME="linux-whatsapp-web"
+PROGRAM_VERSION="0.1.0"
+OFFICIAL_URL="https://web.whatsapp.com/"
+CONFIG_FILENAME="config"
+
+if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+  CONFIG_HOME="${XDG_CONFIG_HOME}"
+else
+  CONFIG_HOME="${HOME:?HOME is not set}/.config"
+fi
+
+if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+  DATA_HOME="${XDG_DATA_HOME}"
+else
+  DATA_HOME="${HOME:?HOME is not set}/.local/share"
+fi
+
+CONFIG_DIR="${CONFIG_HOME}/${PROGRAM_NAME}"
+CONFIG_FILE="${CONFIG_DIR}/${CONFIG_FILENAME}"
+DESKTOP_FILE="${DATA_HOME}/applications/${PROGRAM_NAME}.desktop"
+ICON_FILE="${DATA_HOME}/icons/hicolor/256x256/apps/${PROGRAM_NAME}.png"
+
+usage() {
+  cat <<'EOF'
+linux-whatsapp-web - Brave WhatsApp Web PWA helper
+
+Usage:
+  linux-whatsapp-web setup [options]
+  linux-whatsapp-web launch
+  linux-whatsapp-web doctor [--json]
+  linux-whatsapp-web repair-input [--apply]
+  linux-whatsapp-web uninstall [--yes]
+  linux-whatsapp-web version
+
+Setup options:
+  --browser PATH       Brave executable (auto-detected by default)
+  --profile NAME       Brave profile directory (Default by default)
+  --profile-root PATH  Brave user-data root (auto-detected by default)
+  --app-id ID          Installed PWA application ID (auto-detected by default)
+  --yes                Non-interactive confirmation where safe
+
+This utility never copies or edits browser cookies, IndexedDB, messages,
+QR credentials, or any other WhatsApp session data.
+EOF
+}
+
+info() { printf 'INFO: %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+require_regular_user() {
+  [[ "${EUID}" -ne 0 ]] || die "Do not run this command as root or with sudo."
+}
+
+is_valid_app_id() {
+  [[ "${1:-}" =~ ^[a-p]{32}$ ]]
+}
+
+official_app_id() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "${OFFICIAL_URL}" <<'PY'
+import hashlib, sys
+value = sys.argv[1].encode("utf-8")
+digest = hashlib.sha256(hashlib.sha256(value).digest()).hexdigest()[:32]
+print("".join(chr(ord("a") + int(char, 16)) for char in digest))
+PY
+}
+
+detect_browser() {
+  local candidate
+  for candidate in \
+    "${LINUX_WHATSAPP_WEB_BROWSER:-}" \
+    /usr/bin/brave-browser \
+    /usr/bin/brave-browser-stable \
+    /snap/bin/brave; do
+    [[ -n "${candidate}" && -x "${candidate}" ]] && {
+      printf '%s\n' "${candidate}"
+      return 0
+    }
+  done
+  return 1
+}
+
+profile_root_for_browser() {
+  local browser="$1"
+  case "${browser}" in
+    /snap/bin/brave|*/snap/*/brave)
+      printf '%s\n' "${HOME}/snap/brave/current/.config/BraveSoftware/Brave-Browser"
+      ;;
+    *)
+      printf '%s\n' "${HOME}/.config/BraveSoftware/Brave-Browser"
+      ;;
+  esac
+}
+
+read_config() {
+  [[ -r "${CONFIG_FILE}" ]] || return 1
+  local key value
+  BROWSER=""
+  PROFILE=""
+  PROFILE_ROOT=""
+  APP_ID=""
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      BROWSER) BROWSER="${value}" ;;
+      PROFILE) PROFILE="${value}" ;;
+      PROFILE_ROOT) PROFILE_ROOT="${value}" ;;
+      APP_ID) APP_ID="${value}" ;;
+    esac
+  done < "${CONFIG_FILE}"
+  [[ -n "${BROWSER}" && -n "${PROFILE}" && -n "${PROFILE_ROOT}" ]]
+}
+
+write_config() {
+  local browser="$1" profile="$2" profile_root="$3" app_id="$4"
+  mkdir -p "${CONFIG_DIR}"
+  chmod 700 "${CONFIG_DIR}"
+  local tmp
+  tmp="$(mktemp "${CONFIG_DIR}/config.XXXXXX")"
+  {
+    printf 'BROWSER=%s\n' "${browser}"
+    printf 'PROFILE=%s\n' "${profile}"
+    printf 'PROFILE_ROOT=%s\n' "${profile_root}"
+    printf 'APP_ID=%s\n' "${app_id}"
+  } > "${tmp}"
+  chmod 600 "${tmp}"
+  mv -f "${tmp}" "${CONFIG_FILE}"
+}
+
+profile_manifest_root() {
+  printf '%s/%s/Web Applications/Manifest Resources\n' "$1" "$2"
+}
+
+discover_app_ids() {
+  local profile_root="$1" profile="$2" manifest_root candidate
+  manifest_root="$(profile_manifest_root "${profile_root}" "${profile}")"
+  [[ -d "${manifest_root}" ]] || return 0
+  for candidate in "${manifest_root}"/*; do
+    [[ -d "${candidate}" ]] || continue
+    candidate="${candidate##*/}"
+    is_valid_app_id "${candidate}" && printf '%s\n' "${candidate}"
+  done | sort -u
+}
+
+resolve_app_id() {
+  local explicit="$1" profile_root="$2" profile="$3" id expected
+  if [[ -n "${explicit}" ]]; then
+    is_valid_app_id "${explicit}" || die "Invalid Chromium PWA app ID: ${explicit}"
+    expected="$(official_app_id 2>/dev/null || true)"
+    if [[ -n "${expected}" && "${explicit}" != "${expected}" ]]; then
+      die "The supplied PWA ID does not match the current official WhatsApp Web manifest ID."
+    fi
+    printf '%s\n' "${explicit}"
+    return 0
+  fi
+
+  local -a ids=() matches=()
+  mapfile -t ids < <(discover_app_ids "${profile_root}" "${profile}")
+  expected="$(official_app_id 2>/dev/null || true)"
+  for id in "${ids[@]}"; do
+    [[ -n "${expected}" && "${id}" == "${expected}" ]] && matches+=("${id}")
+  done
+  if (( ${#matches[@]} == 1 )); then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+  if (( ${#ids[@]} > 0 )); then
+    warn "Installed Brave Web Apps were found, but none matches the current official WhatsApp Web ID."
+    printf '%s\n' "${ids[@]}" >&2
+    die "Install WhatsApp Web as a Brave Web App, or pass its verified ID with --app-id."
+  fi
+  return 1
+}
+
+find_icon() {
+  local profile_root="$1" profile="$2" app_id="$3" base size
+  base="$(profile_manifest_root "${profile_root}" "${profile}")/${app_id}/Icons"
+  for size in 256 512 192 128 96 64 48 32 16; do
+    [[ -f "${base}/${size}.png" ]] && {
+      printf '%s\n' "${base}/${size}.png"
+      return 0
+    }
+  done
+  return 1
+}
+
+desktop_escape_exec_arg() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\`/\\\`}"
+  value="${value//\$/\\\$}"
+  printf '"%s"' "${value}"
+}
+
+install_desktop_entry() {
+  local app_id="$1" icon_value="$2" launcher="$3" startup_class
+  mkdir -p "$(dirname "${DESKTOP_FILE}")"
+  if [[ -n "${app_id}" ]]; then
+    startup_class="crx_${app_id}"
+  else
+    startup_class="brave-browser.Brave-browser"
+  fi
+  {
+    printf '%s\n' '[Desktop Entry]'
+    printf '%s\n' 'Version=1.0'
+    printf '%s\n' 'Type=Application'
+    printf '%s\n' 'Name=WhatsApp Web'
+    printf '%s\n' 'Comment=Official WhatsApp Web in Brave'
+    printf 'Exec=%s launch\n' "$(desktop_escape_exec_arg "${launcher}")"
+    printf 'Icon=%s\n' "${icon_value}"
+    printf '%s\n' 'Terminal=false'
+    printf '%s\n' 'Categories=Network;InstantMessaging;Chat;'
+    printf '%s\n' 'Keywords=WhatsApp;Web;Message;Chat;Mesaj;Sohbet;'
+    printf '%s\n' 'StartupNotify=true'
+    printf 'StartupWMClass=%s\n' "${startup_class}"
+  } > "${DESKTOP_FILE}"
+  chmod 644 "${DESKTOP_FILE}"
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$(dirname "${DESKTOP_FILE}")" >/dev/null 2>&1 || true
+  fi
+}
+
+setup_command() {
+  require_regular_user
+  local browser="" profile="Default" profile_root="" app_id="" assume_yes=false
+  while (( $# )); do
+    case "$1" in
+      --browser) [[ $# -ge 2 ]] || die "--browser requires a path"; browser="$2"; shift 2 ;;
+      --profile) [[ $# -ge 2 ]] || die "--profile requires a name"; profile="$2"; shift 2 ;;
+      --profile-root) [[ $# -ge 2 ]] || die "--profile-root requires a path"; profile_root="$2"; shift 2 ;;
+      --app-id) [[ $# -ge 2 ]] || die "--app-id requires an ID"; app_id="$2"; shift 2 ;;
+      --yes) assume_yes=true; shift ;;
+      *) die "Unknown setup option: $1" ;;
+    esac
+  done
+
+  [[ "${profile}" != *$'\n'* && "${profile}" != */* && "${profile}" != "." && "${profile}" != ".." ]] || \
+    die "Invalid profile directory name."
+  if [[ -z "${browser}" ]]; then
+    browser="$(detect_browser)" || die "Brave was not found. Install it from https://brave.com/linux/"
+  fi
+  [[ -x "${browser}" ]] || die "Browser is not executable: ${browser}"
+  [[ -n "${profile_root}" ]] || profile_root="$(profile_root_for_browser "${browser}")"
+  [[ "${browser}" != *$'\n'* && "${profile_root}" != *$'\n'* ]] || die "Browser paths must not contain newlines."
+  [[ -d "${profile_root}/${profile}" ]] || die "Brave profile not found: ${profile_root}/${profile}"
+
+  local resolved_app_id=""
+  if resolved_app_id="$(resolve_app_id "${app_id}" "${profile_root}" "${profile}")"; then
+    app_id="${resolved_app_id}"
+  else
+    app_id=""
+  fi
+
+  if [[ -n "${app_id}" && ! -d "$(profile_manifest_root "${profile_root}" "${profile}")/${app_id}" ]]; then
+    die "The selected PWA ID is not installed in Brave profile '${profile}'."
+  fi
+
+  if [[ -z "${app_id}" ]]; then
+    warn "The WhatsApp Web PWA could not be identified yet."
+    info "Brave will open the official site. In Brave, use Save and share > Install WhatsApp Web."
+    "${browser}" --profile-directory="${profile}" "${OFFICIAL_URL}" >/dev/null 2>&1 &
+    if [[ "${assume_yes}" == true ]]; then
+      die "Install the PWA, then rerun setup (or pass --app-id ID)."
+    fi
+    read -r -p "Press Enter after the PWA installation is complete... "
+    app_id="$(resolve_app_id "" "${profile_root}" "${profile}")" || \
+      die "No unique PWA installation was found. See docs/INSTALL.md."
+  fi
+
+  write_config "${browser}" "${profile}" "${profile_root}" "${app_id}"
+
+  local icon_source="" icon_value="web-browser-symbolic"
+  if icon_source="$(find_icon "${profile_root}" "${profile}" "${app_id}")"; then
+    mkdir -p "$(dirname "${ICON_FILE}")"
+    install -m 0644 "${icon_source}" "${ICON_FILE}"
+    icon_value="${PROGRAM_NAME}"
+  fi
+
+  local launcher="${LINUX_WHATSAPP_WEB_LAUNCHER:-}"
+  if [[ -z "${launcher}" ]]; then
+    launcher="$(command -v "${PROGRAM_NAME}" 2>/dev/null || true)"
+  fi
+  [[ -n "${launcher}" ]] || launcher="$(readlink -f "${BASH_SOURCE[0]}")"
+  install_desktop_entry "${app_id}" "${icon_value}" "${launcher}"
+
+  info "Configured Brave profile: ${profile}"
+  info "Detected PWA app ID: ${app_id}"
+  info "Desktop launcher: ${DESKTOP_FILE}"
+  info "No browser profile or WhatsApp session data was copied or modified."
+}
+
+launch_command() {
+  require_regular_user
+  read_config || die "Not configured. Run: ${PROGRAM_NAME} setup"
+  [[ -x "${BROWSER}" ]] || die "Configured Brave executable is missing: ${BROWSER}"
+  is_valid_app_id "${APP_ID}" || die "Configured PWA app ID is invalid. Run setup again."
+  exec "${BROWSER}" --profile-directory="${PROFILE}" --app-id="${APP_ID}"
+}
+
+ibus_snapshot() {
+  local address="" socket="" service="unknown"
+  if command -v ibus >/dev/null 2>&1; then
+    address="$(ibus address 2>/dev/null || true)"
+  fi
+  if [[ "${address}" =~ unix:path=([^,]+) ]]; then
+    socket="${BASH_REMATCH[1]}"
+  elif [[ "${address}" =~ unix:abstract=([^,]+) ]]; then
+    socket="@${BASH_REMATCH[1]}"
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    service="$(systemctl --user is-active org.freedesktop.IBus.session.GNOME.service 2>/dev/null || true)"
+  fi
+  IBUS_ADDRESS="${address}"
+  IBUS_SOCKET="${socket}"
+  IBUS_SERVICE="${service:-unknown}"
+}
+
+doctor_command() {
+  local json=false
+  [[ "${1:-}" == "--json" ]] && { json=true; shift; }
+  (( $# == 0 )) || die "Unknown doctor option: $1"
+  local configured=false browser="" profile="" profile_root="" app_id=""
+  if read_config; then
+    configured=true
+    browser="${BROWSER}"
+    profile="${PROFILE}"
+    profile_root="${PROFILE_ROOT}"
+    app_id="${APP_ID}"
+  else
+    browser="$(detect_browser 2>/dev/null || true)"
+    profile="Default"
+    [[ -n "${browser}" ]] && profile_root="$(profile_root_for_browser "${browser}")"
+  fi
+  ibus_snapshot
+  local browser_ok=false profile_ok=false pwa_ok=false desktop_ok=false ibus_ok=false
+  [[ -n "${browser}" && -x "${browser}" ]] && browser_ok=true
+  [[ -n "${profile_root}" && -d "${profile_root}/${profile}" ]] && profile_ok=true
+  [[ -n "${app_id}" && -d "$(profile_manifest_root "${profile_root}" "${profile}")/${app_id}" ]] && pwa_ok=true
+  [[ -f "${DESKTOP_FILE}" ]] && desktop_ok=true
+  if [[ "${IBUS_SOCKET}" == @* ]]; then
+    [[ -n "${IBUS_ADDRESS}" ]] && ibus_ok=true
+  elif [[ -n "${IBUS_SOCKET}" && -S "${IBUS_SOCKET}" ]]; then
+    ibus_ok=true
+  fi
+
+  if [[ "${json}" == true ]]; then
+    command -v python3 >/dev/null 2>&1 || die "python3 is required for JSON output."
+    BROWSER_VALUE="${browser}" PROFILE_VALUE="${profile}" PROFILE_ROOT_VALUE="${profile_root}" \
+      APP_ID_VALUE="${app_id}" IBUS_ADDRESS_VALUE="${IBUS_ADDRESS}" IBUS_SOCKET_VALUE="${IBUS_SOCKET}" \
+      CONFIGURED_VALUE="${configured}" BROWSER_OK_VALUE="${browser_ok}" PROFILE_OK_VALUE="${profile_ok}" \
+      PWA_OK_VALUE="${pwa_ok}" DESKTOP_OK_VALUE="${desktop_ok}" IBUS_OK_VALUE="${ibus_ok}" \
+      IBUS_SERVICE_VALUE="${IBUS_SERVICE}" DESKTOP_FILE_VALUE="${DESKTOP_FILE}" python3 - <<'PY'
+import json, os
+def flag(name): return os.environ[name] == "true"
+print(json.dumps({
+  "configured": flag("CONFIGURED_VALUE"),
+  "browser": {"path": os.environ["BROWSER_VALUE"], "ok": flag("BROWSER_OK_VALUE")},
+  "profile": {"name": os.environ["PROFILE_VALUE"], "root": os.environ["PROFILE_ROOT_VALUE"], "ok": flag("PROFILE_OK_VALUE")},
+  "pwa": {"app_id": os.environ["APP_ID_VALUE"], "ok": flag("PWA_OK_VALUE")},
+  "desktop_entry": {"path": os.environ["DESKTOP_FILE_VALUE"], "ok": flag("DESKTOP_OK_VALUE")},
+  "ibus": {"service": os.environ["IBUS_SERVICE_VALUE"], "address": os.environ["IBUS_ADDRESS_VALUE"], "socket": os.environ["IBUS_SOCKET_VALUE"], "ok": flag("IBUS_OK_VALUE")},
+}, indent=2))
+PY
+  else
+    printf 'Configuration: %s\n' "${configured}"
+    printf 'Brave:         %s (%s)\n' "${browser:-not found}" "${browser_ok}"
+    printf 'Profile:       %s/%s (%s)\n' "${profile_root:-not found}" "${profile}" "${profile_ok}"
+    printf 'PWA app ID:    %s (%s)\n' "${app_id:-not configured}" "${pwa_ok}"
+    printf 'Desktop entry: %s (%s)\n' "${DESKTOP_FILE}" "${desktop_ok}"
+    printf 'IBus service:  %s\n' "${IBUS_SERVICE}"
+    printf 'IBus address:  %s\n' "${IBUS_ADDRESS:-not available}"
+    printf 'IBus socket:   %s (%s)\n' "${IBUS_SOCKET:-not available}" "${ibus_ok}"
+    [[ "${ibus_ok}" == true ]] || warn "IBus is not healthy. If typing fails only in Brave, run: ${PROGRAM_NAME} repair-input"
+  fi
+}
+
+repair_input_command() {
+  require_regular_user
+  local apply=false
+  [[ "${1:-}" == "--apply" ]] && { apply=true; shift; }
+  (( $# == 0 )) || die "Unknown repair-input option: $1"
+  ibus_snapshot
+  printf 'Current IBus service: %s\n' "${IBUS_SERVICE}"
+  printf 'Current IBus address: %s\n' "${IBUS_ADDRESS:-not available}"
+  if [[ "${apply}" != true ]]; then
+    cat <<'EOF'
+No change was made. This repair restarts only your user IBus service.
+Active composition text may be lost and open applications may need reopening.
+Run with --apply only after saving unfinished text.
+EOF
+    return 0
+  fi
+  command -v ibus >/dev/null 2>&1 || die "ibus is not installed."
+  warn "Restarting the IBus service for the current user session."
+  ibus restart
+  local attempt
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    sleep 0.25
+    ibus_snapshot
+    if [[ "${IBUS_SOCKET}" == @* || -S "${IBUS_SOCKET:-/path/that/does/not/exist}" ]]; then
+      break
+    fi
+  done
+  [[ -n "${IBUS_ADDRESS}" ]] || die "IBus did not publish a new address."
+  if [[ "${IBUS_SOCKET}" != @* ]]; then
+    [[ -S "${IBUS_SOCKET}" ]] || die "IBus address points to a missing socket: ${IBUS_SOCKET}"
+  fi
+  info "IBus restarted successfully. Close all Brave windows and open WhatsApp Web again."
+}
+
+uninstall_command() {
+  require_regular_user
+  local assume_yes=false
+  [[ "${1:-}" == "--yes" ]] && { assume_yes=true; shift; }
+  (( $# == 0 )) || die "Unknown uninstall option: $1"
+  if [[ "${assume_yes}" != true ]]; then
+    cat <<EOF
+This removes only:
+  ${CONFIG_DIR}
+  ${DESKTOP_FILE}
+  ${ICON_FILE}
+
+It will NOT remove Brave, the installed PWA, cookies, IndexedDB, chats, or login state.
+EOF
+    read -r -p "Continue? [y/N] " answer
+    [[ "${answer}" =~ ^[Yy]$ ]] || { info "Cancelled."; return 0; }
+  fi
+  rm -f -- "${DESKTOP_FILE}" "${ICON_FILE}" "${CONFIG_FILE}"
+  rmdir --ignore-fail-on-non-empty "${CONFIG_DIR}" 2>/dev/null || true
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$(dirname "${DESKTOP_FILE}")" >/dev/null 2>&1 || true
+  fi
+  info "Project-owned user files removed. Brave and WhatsApp session data were untouched."
+}
+
+main() {
+  local command="${1:-help}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+  case "${command}" in
+    setup) setup_command "$@" ;;
+    launch) launch_command "$@" ;;
+    doctor) doctor_command "$@" ;;
+    repair-input) repair_input_command "$@" ;;
+    uninstall) uninstall_command "$@" ;;
+    version|--version|-V) printf '%s %s\n' "${PROGRAM_NAME}" "${PROGRAM_VERSION}" ;;
+    help|--help|-h) usage ;;
+    *) usage >&2; die "Unknown command: ${command}" ;;
+  esac
+}
+
+main "$@"
